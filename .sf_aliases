@@ -1,0 +1,549 @@
+#!/bin/bash
+
+# Source shared SF common library (defines KEY_BMC, KEY_HOST, SF_GBMC_IP, SSH_OPTS, colors, _log_cmd, _smart_ssh, _smart_scp, _parse_sf_slots)
+if [[ -f "${HOME}/santhoshsnair/scripts/sf/sf_common.sh" ]]; then
+    source "${HOME}/santhoshsnair/scripts/sf/sf_common.sh"
+fi
+
+alias sss='unalias -a; unset _SSN_COMMON_SH_LOADED _SSN_SF_COMMON_SH_LOADED; [ -f "$HOME/santhoshsnair/.bashrc" ] && source "$HOME/santhoshsnair/.bashrc" || source "$HOME/.bashrc"'
+
+zb_cmd() {
+    local id="${1:-}"
+    [[ -z "$id" ]] && { echo -e "${RED}Usage: zb_cmd <1-16|21-36> [command]${NC}" >&2; return 1; }
+    shift
+    local cmd="$*"
+    id="${id#root@}"
+    id="${id#10.0.0.}"
+    local target_id="$id"
+    if [[ "$id" =~ ^[0-9]+$ ]]; then
+        if ! _check_host_online "$id"; then
+            local alt_id=""
+            if (( id >= 1 && id <= 16 )); then
+                alt_id=$((id + 20))
+            elif (( id >= 21 && id <= 36 )); then
+                alt_id=$((id - 20))
+            fi
+            if [[ -n "$alt_id" ]] && _check_host_online "$alt_id"; then
+                target_id="$alt_id"
+            else
+                echo -e "${YELLOW}ZB Host 10.0.0.${id}: OFFLINE / UNREACHABLE${NC}" >&2
+                return 1
+            fi
+        fi
+    fi
+    _log_cmd ssh $SSH_OPTS -i "$KEY_HOST" "root@10.0.0.${target_id}" "$cmd"
+    if [[ -n "$cmd" ]]; then
+        ssh $SSH_OPTS -i "$KEY_HOST" "root@10.0.0.${target_id}" "$cmd"
+    else
+        ssh $SSH_OPTS -i "$KEY_HOST" "root@10.0.0.${target_id}"
+    fi
+}
+
+zb_bmc_cmd() {
+    local mode="auto"
+    local -a pos_args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --bmcnet) mode="bmcnet"; shift ;;
+            --usbnet|--usb-net) mode="usbnet"; shift ;;
+            --auto) mode="auto"; shift ;;
+            *) pos_args+=("$1"); shift ;;
+        esac
+    done
+    local id="${pos_args[0]:-}"
+    [[ -z "$id" ]] && { echo -e "${RED}Usage: zb_bmc_cmd [--bmcnet|--usbnet] <slot|zb_id|bmc_id> [command]${NC}" >&2; return 1; }
+    local cmd="${pos_args[*]:1}"
+    local resolved
+    if ! resolved=$(_resolve_zb_bmc_connection "$id" "$mode"); then
+        local desc="${resolved##*|}"
+        echo -e "${YELLOW}Slot ${id} ZB gBMC: ${desc:-OFFLINE / UNREACHABLE}${NC}" >&2
+        return 1
+    fi
+    local r_mode jump_host target_host scp_target slot desc
+    IFS='|' read -r r_mode jump_host target_host scp_target slot desc <<< "$resolved"
+    _SSN_SKIP_PRECHECK=1 _smart_ssh "$jump_host" "$target_host" "$cmd"
+}
+
+zb_scp() {
+    local id="${1:-}"
+    local src="${2:-}"
+    local dst="${3:-}"
+    [[ -z "$id" || -z "$src" || -z "$dst" ]] && { echo -e "${RED}Usage: zb_scp <1-16|21-36> <local_src> <remote_dst>${NC}" >&2; return 1; }
+    id="${id#root@}"
+    id="${id#10.0.0.}"
+    local target_id="$id"
+    if [[ "$id" =~ ^[0-9]+$ ]] && ! _check_host_online "$id"; then
+        local alt_id=""
+        if (( id >= 1 && id <= 16 )); then
+            alt_id=$((id + 20))
+        elif (( id >= 21 && id <= 36 )); then
+            alt_id=$((id - 20))
+        fi
+        if [[ -n "$alt_id" ]] && _check_host_online "$alt_id"; then
+            target_id="$alt_id"
+        else
+            echo -e "${YELLOW}ZB Host 10.0.0.${id}: OFFLINE / UNREACHABLE${NC}" >&2
+            return 1
+        fi
+    fi
+    _log_cmd scp $SSH_OPTS -i "$KEY_HOST" "$src" "root@10.0.0.${target_id}:${dst}"
+    scp $SSH_OPTS -i "$KEY_HOST" "$src" "root@10.0.0.${target_id}:${dst}"
+}
+
+zb_bmc_scp() {
+    local mode="auto"
+    local -a pos_args=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --bmcnet) mode="bmcnet"; shift ;;
+            --usbnet|--usb-net) mode="usbnet"; shift ;;
+            --auto) mode="auto"; shift ;;
+            *) pos_args+=("$1"); shift ;;
+        esac
+    done
+    local id="${pos_args[0]:-}"
+    local src="${pos_args[1]:-}"
+    local dst="${pos_args[2]:-}"
+    [[ -z "$id" || -z "$src" || -z "$dst" ]] && { echo -e "${RED}Usage: zb_bmc_scp [--bmcnet|--usbnet] <slot|zb_id|bmc_id> <local_src> <remote_dst>${NC}" >&2; return 1; }
+    local resolved
+    if ! resolved=$(_resolve_zb_bmc_connection "$id" "$mode"); then
+        local desc="${resolved##*|}"
+        echo -e "${YELLOW}Slot ${id} ZB gBMC: ${desc:-OFFLINE / UNREACHABLE}${NC}" >&2
+        return 1
+    fi
+    local r_mode jump_host target_host scp_target slot desc
+    IFS='|' read -r r_mode jump_host target_host scp_target slot desc <<< "$resolved"
+    _SSN_SKIP_PRECHECK=1 _smart_scp "$jump_host" "$scp_target" "$src" "$dst"
+}
+
+zb_uptime()        { zb_cmd "$1" "cat /proc/uptime"; }
+zb_kernel()        { zb_cmd "$1" "uname -a"; }
+zb_ip_link()       { zb_cmd "$1" "ip link"; }
+zb_fw_list()       { zb_bmc_cmd "$1" "fii-fw-ver.sh"; }
+zb_pcie_list()     { zb_cmd "$1" "gsys -k pcie list"; }
+zb_sensor_list()   { zb_cmd "$1" "gsys -k sensor list"; }
+zb_bmc_ping()      { zb_cmd "$1" "ping6 -c 5 localbmc"; }
+
+sf_bmc_uptime()    { sf_bmc_cmd "$@" "cat /proc/uptime"; }
+
+_render_firmware_table() {
+    local title="$1"
+    local pattern="$2"
+    local tmp_dir="$3"
+    shift 3
+    local -a slots=("$@")
+
+    echo -e "${BLUE}================================================================================${NC}"
+    if [[ -n "$pattern" ]]; then
+        printf "${BLUE}   %-55s [Filter: %s]   ${NC}\n" "$title" "$pattern"
+    else
+        printf "${BLUE}   %-73s    ${NC}\n" "$title" "$pattern"
+    fi
+    echo -e "${BLUE}================================================================================${NC}"
+    printf "${CYAN}%-8s${NC} | ${CYAN}%-24s${NC} | ${CYAN}%-40s${NC}\n" "Slot" "Component" "Version"
+    echo -e "--------------------------------------------------------------------------------"
+
+    local total_slots=${#slots[@]}
+    local slot_idx=0
+
+    for slot in "${slots[@]}"; do
+        ((slot_idx++))
+        local outfile="${tmp_dir}/slot_${slot}.txt"
+        if [[ ! -f "$outfile" ]]; then
+            printf "${YELLOW}%-8s${NC} | ${RED}%-24s${NC} | ${RED}%-40s${NC}\n" "Slot $slot" "[ERROR]" "No output received"
+        else
+            local first_line
+            first_line=$(head -n 1 "$outfile")
+            if [[ "$first_line" =~ ^STATUS\|OFFLINE\|(.*)$ ]]; then
+                printf "${YELLOW}%-8s${NC} | ${RED}%-24s${NC} | ${RED}%-40s${NC}\n" "Slot $slot" "[OFFLINE]" "${BASH_REMATCH[1]}"
+            elif [[ "$first_line" =~ ^STATUS\|ERROR\|(.*)$ ]]; then
+                printf "${YELLOW}%-8s${NC} | ${RED}%-24s${NC} | ${RED}%-40s${NC}\n" "Slot $slot" "[ERROR]" "${BASH_REMATCH[1]}"
+            else
+                local matched_count=0
+                while read -r comp ver; do
+                    [[ -z "$comp" ]] && continue
+                    if [[ -n "$pattern" ]] && ! echo "$comp" | grep -iqE "$pattern"; then
+                        continue
+                    fi
+                    ((matched_count++))
+                    printf "%-8s | %-24s | ${GREEN}%-40s${NC}\n" "Slot $slot" "$comp" "$ver"
+                done < "$outfile"
+
+                if [[ $matched_count -eq 0 ]]; then
+                    printf "%-8s | ${YELLOW}%-24s${NC} | ${YELLOW}%-40s${NC}\n" "Slot $slot" "[NO MATCH]" "No components matched filter '${pattern}'"
+                fi
+            fi
+        fi
+
+        if [[ $total_slots -gt 1 && $slot_idx -lt $total_slots ]]; then
+            echo -e "${BLUE}--------------------------------------------------------------------------------${NC}"
+        fi
+    done
+    echo -e "${BLUE}================================================================================${NC}"
+}
+
+sf_fw_list() {
+    local conn_mode="${SF_CONN_MODE:-auto}"
+    local -a patterns=()
+    local -a slot_args=()
+    for arg in "$@"; do
+        case "$arg" in
+            --bmcnet) conn_mode="bmcnet" ;;
+            --usbnet|--usb-net) conn_mode="usbnet" ;;
+            --auto) conn_mode="auto" ;;
+            --*)
+                if [[ "$arg" =~ ^--([a-zA-Z0-9_-]+)$ ]]; then
+                    patterns+=("^${BASH_REMATCH[1]}")
+                fi
+                ;;
+            *)
+                slot_args+=("$arg")
+                ;;
+        esac
+    done
+
+    local slots=($(_parse_sf_slots "${slot_args[*]}"))
+    if [[ ${#slots[@]} -eq 0 ]]; then
+        echo -e "${YELLOW}No valid slots specified.${NC}" >&2
+        return 1
+    fi
+
+    local pattern=""
+    if [[ ${#patterns[@]} -gt 0 ]]; then
+        pattern=$(IFS='|'; echo "${patterns[*]}")
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d /tmp/sf_fw_XXXXXX)
+    trap 'rm -rf "$tmp_dir"' RETURN
+
+    _log_cmd "sf_bmc_cmd [${slots[*]}] /usr/bin/list_firmware.sh"
+    echo -e "${CYAN}[*] Querying TPU firmware across ${#slots[@]} slot(s) in parallel (mode: ${conn_mode})...${NC}"
+    (
+        for slot in "${slots[@]}"; do
+            (
+                local outfile="${tmp_dir}/slot_${slot}.txt"
+                local resolved
+                if ! resolved=$(_resolve_sf_connection "$slot" "$conn_mode"); then
+                    local desc="${resolved##*|}"
+                    echo "STATUS|OFFLINE|${desc:-Tray unreachable}" > "$outfile"
+                    exit 0
+                fi
+
+                local raw
+                if raw=$(SF_CONN_MODE="$conn_mode" sf_bmc_cmd "$slot" "/usr/bin/list_firmware.sh" 2>/dev/null); then
+                    if [[ -n "$raw" ]]; then
+                        echo "$raw" > "$outfile"
+                    else
+                        echo "STATUS|ERROR|Empty response from list_firmware.sh" > "$outfile"
+                    fi
+                else
+                    echo "STATUS|ERROR|Failed to execute list_firmware.sh" > "$outfile"
+                fi
+            ) &
+        done
+        wait
+    )
+
+    local title="TPU Firmware Versions"
+    if [[ ${#slots[@]} -eq 1 ]]; then
+        title="TPU Firmware Versions - Slot ${slots[0]}"
+    else
+        title="TPU Firmware Versions - Slots: ${slots[*]}"
+    fi
+
+    _render_firmware_table "$title" "$pattern" "$tmp_dir" "${slots[@]}"
+}
+
+sf_bmc_fw_list() {
+    sf_fw_list "$@"
+}
+
+sf_bmc_hardware_parts() { sf_bmc_cmd "$@" "/usr/bin/hardware_parts.sh"; }
+sf_bmc_fru_list()       { sf_bmc_cmd "$@" "ipmitool fru"; }
+
+sf_ping_gbmc_bmc() {
+    local raw="${1:-}"
+    [[ -z "$raw" ]] && return 1
+    local norm
+    local bmc_octet="$raw"
+    if norm=$(_normalize_sf_id "$raw"); then
+        bmc_octet="${norm##*|}"
+    fi
+    _log_cmd ping -c 5 "10.0.0.${bmc_octet}"
+    ping -c 5 "10.0.0.${bmc_octet}"
+}
+
+zb_bmc_powercycle() {
+    local id="$1"
+    zb_bmc_cmd "$id" "nohup systemctl start gbmc-psu-hardreset.target > /dev/null 2>&1 &"
+}
+
+sf_bmc_powercycle() {
+    sf_bmc_cmd "$@" "nohup tray_powercycle.sh > /dev/null 2>&1 &"
+}
+
+check_nodes() {
+  _log_cmd "seq 1 16 | xargs -P 16 -I {} bash -c 'ping -c 1 -W 1 10.0.0.\$ip0...'"
+  seq 1 16 | xargs -P 16 -I {} bash -c '
+  slot=$1
+  ip0=$slot
+  ip1=$((slot + 20))
+  ip_sf=$((slot + 50))
+  ip_bmc=$((slot + 80))
+
+  # Check CN0 (10.0.0.1-16)
+  if ping -c 1 -W 1 "10.0.0.$ip0" >/dev/null 2>&1; then
+    st0="UP"
+  else
+    st0="DOWN"
+  fi
+
+  # Check CN1 (10.0.0.21-36)
+  if ping -c 1 -W 1 "10.0.0.$ip1" >/dev/null 2>&1; then
+    st1="UP"
+  else
+    st1="DOWN"
+  fi
+
+  # Check SF (10.0.0.51-66)
+  if ping -c 1 -W 1 "10.0.0.$ip_sf" >/dev/null 2>&1; then
+    st_sf="UP"
+  else
+    st_sf="DOWN"
+  fi
+
+  # Check BMCNet (10.0.0.81-96)
+  if ping -c 1 -W 1 "10.0.0.$ip_bmc" >/dev/null 2>&1; then
+    st_bmc="UP"
+  else
+    st_bmc="DOWN"
+  fi
+
+  # Print the aligned results
+  printf "slot-%-2s      |       CN0 %-4s     |       CN1 %-4s     |       SF %-4s     |       BMCNet %-4s\n" "$slot" "$st0" "$st1" "$st_sf" "$st_bmc"
+  ' _ {} | sort -V
+}
+
+ssh_by_mac() {
+    local mac="$1"
+    [[ -z "$mac" ]] && return 1
+    local clean_mac=$(echo "$mac" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+    local formatted_mac=$(echo "$clean_mac" | sed 's/../&:/g;s/:$//')
+    local ip_addr=$(ip neigh | grep -i "$formatted_mac" | awk '!/::/ {print $1}')
+    [[ -z "$ip_addr" ]] && return 1
+    _log_cmd ssh $SSH_OPTS -i "$KEY_BMC" "root@$ip_addr"
+    ssh $SSH_OPTS -i "$KEY_BMC" "root@$ip_addr"
+}
+
+scan_slots() {
+    local conn_mode="${SF_CONN_MODE:-auto}"
+    local -a slot_args=()
+    for arg in "$@"; do
+        case "$arg" in
+            --bmcnet) conn_mode="bmcnet" ;;
+            --usbnet|--usb-net) conn_mode="usbnet" ;;
+            --auto) conn_mode="auto" ;;
+            *) slot_args+=("$arg") ;;
+        esac
+    done
+    local targets
+    if [[ ${#slot_args[@]} -gt 0 ]]; then
+        targets=$(_parse_sf_slots "${slot_args[*]}")
+    else
+        targets=$(seq 1 16)
+    fi
+
+    _log_cmd "sf_bmc_cmd [${targets//$'\n'/ }] ipmitool fru"
+    _scan_single_slot() {
+        local slot=$1
+        local output
+        local exit_code
+
+        if ! _check_gbmc_online "$slot" "$conn_mode"; then
+            echo "Slot $slot: OFFLINE"
+            return
+        fi
+
+        output=$(SF_CONN_MODE="$conn_mode" sf_bmc_cmd "$slot" "ipmitool fru 2>/dev/null" 2>&1)
+        exit_code=$?
+
+        if [[ $exit_code -eq 255 ]]; then
+            if [[ "$output" == *"Permission denied"* ]]; then
+                echo "Slot $slot: INVALID"
+            else
+                echo "Slot $slot: EMPTY"
+            fi
+        else
+            local serial
+            serial=$(echo "$output" | awk -F': ' '/Product Serial/ {print $2; exit}' | xargs)
+            if [[ -n "$serial" ]]; then
+                echo "Slot $slot: $serial"
+            else
+                echo "Slot $slot: EMPTY"
+            fi
+        fi
+    }
+
+    (
+        for slot in $targets; do
+            _scan_single_slot "$slot" &
+        done
+        wait
+    ) | sort -V
+}
+
+zb_pcie_ib() {
+    [ -z "$1" ] && return 1
+    local slot=$1
+    local cns=("${slot}" "$((20 + slot))")
+    local parser="grep 'SFC' | sed -nE 's/.*speed=\"([^\"]+)\".*width=\"([^\"]+)\".*(SFC_[0-9]+).*/\3: Speed \1, Width \2/p'"
+    for cn in "${cns[@]}"; do
+        zb_cmd "$cn" "/usr/local/bin/gsys -k pcie list 2>/dev/null" | eval "$parser"
+    done
+}
+
+sf_pcie_oob() {
+    [ -z "$1" ] && return 1
+    local ids="00:00.0 01:00.0 02:04.0 02:05.0 02:06.0 02:07.0 06:00.0 07:00.0 08:00.0 09:00.0"
+    sf_bmc_cmd "$@" "for id in $ids; do echo -n \"\$id: \"; lspci -s \$id -vv | grep \"LnkSta:\" | sed 's/^[ \t]*//'; done"
+}
+
+ru_sunfish() {
+  _log_cmd "/usr/bin/python3 ~/repo-updater/repo_updater.py -c ~/opentest-celestica-infra/amp/repo_updater/sunfish_ru.cfg"
+  /usr/bin/python3 ~/repo-updater/repo_updater.py -c ~/opentest-celestica-infra/amp/repo_updater/sunfish_ru.cfg
+}
+
+ru_sunfish_with_ot() {
+  _log_cmd "/usr/bin/python3 ~/repo-updater/repo_updater.py -c ~/opentest-celestica-infra/amp/repo_updater/sunfish_ru.cfg"
+  /usr/bin/python3 ~/repo-updater/repo_updater.py -c ~/opentest-celestica-infra/amp/repo_updater/sunfish_ru.cfg
+  _log_cmd "sed -i 's/POST_TIMEOUT_S = 10/POST_TIMEOUT_S = 600/g' /home/testusr/opentest/opentest/tools/otc_upload.py"
+  sed -i 's/POST_TIMEOUT_S = 10/POST_TIMEOUT_S = 600/g' /home/testusr/opentest/opentest/tools/otc_upload.py
+}
+
+sf_hardware_parts() { sf_bmc_cmd "$@" "/usr/bin/hardware_parts.sh"; }
+sf_fru_list()       { sf_bmc_cmd "$@" "ipmitool fru"; }
+sf_bmc_ping() {
+    local mode="${SF_CONN_MODE:-auto}"
+    local id=""
+    for arg in "$@"; do
+        case "$arg" in
+            --bmcnet) mode="bmcnet" ;;
+            --usbnet|--usb-net) mode="usbnet" ;;
+            --auto) mode="auto" ;;
+            *) id="$arg" ;;
+        esac
+    done
+    [[ -z "$id" ]] && return 1
+    local resolved
+    if resolved=$(_resolve_sf_connection "$id" "$mode"); then
+        local r_mode jump_host target_host scp_target slot desc
+        IFS='|' read -r r_mode jump_host target_host scp_target slot desc <<< "$resolved"
+        if [[ "$r_mode" == "bmcnet" ]]; then
+            local bmc_ip="${target_host#*@}"
+            _log_cmd ping -c 5 "$bmc_ip"
+            ping -c 5 "$bmc_ip"
+            return $?
+        else
+            local zb_ip="${jump_host#*@}"
+            zb_cmd "${zb_ip#10.0.0.}" "ping6 -c 5 ${SF_GBMC_IP}"
+            return $?
+        fi
+    else
+        # Fallback to trying bmcnet ping directly so user sees ping output
+        sf_ping_gbmc_bmc "$id"
+    fi
+}
+
+# ==============================================================================
+# HYPHENATED FUNCTION ALIASES (1 per function)
+# ==============================================================================
+alias sf-cmd="sf_cmd"
+alias zb-cmd="zb_cmd"
+alias zb-bmc-cmd="zb_bmc_cmd"
+alias sf-bmc-cmd="sf_bmc_cmd"
+alias sf-scp="sf_scp"
+alias zb-scp="zb_scp"
+alias zb-bmc-scp="zb_bmc_scp"
+alias sf-bmc-scp="sf_bmc_scp"
+alias zb-uptime="zb_uptime"
+alias zb-kernel="zb_kernel"
+alias zb-ip-link="zb_ip_link"
+alias zb-fw-list="zb_fw_list"
+alias zb-pcie-list="zb_pcie_list"
+alias zb-sensor-list="zb_sensor_list"
+alias zb-bmc-ping="zb_bmc_ping"
+alias zb-bmc-powercycle="zb_bmc_powercycle"
+alias zb-pcie-ib="zb_pcie_ib"
+alias sf-bmc-uptime="sf_bmc_uptime"
+alias sf-bmc-fw-list="sf_bmc_fw_list"
+alias sf-bmc-hardware-parts="sf_bmc_hardware_parts"
+alias sf-bmc-fru-list="sf_bmc_fru_list"
+alias sf-bmc-powercycle="sf_bmc_powercycle"
+alias sf-pcie-oob="sf_pcie_oob"
+alias sf-fw-list="sf_fw_list"
+alias sf-hardware-parts="sf_hardware_parts"
+alias sf-fru-list="sf_fru_list"
+alias sf-bmc-ping="sf_bmc_ping"
+alias check-nodes="check_nodes"
+alias ssh-by-mac="ssh_by_mac"
+alias scan-slots="scan_slots"
+alias ru-sunfish="ru_sunfish"
+alias ru-sunfish-with-ot="ru_sunfish_with_ot"
+
+# ==============================================================================
+# SF SCRIPT ALIASES (scripts/sf/ — 1 hyphenated alias per script)
+# ==============================================================================
+alias sf-authz-build='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_authz_build.sh"'
+alias sf-authz-gen-group='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_authz_gen_group.sh"'
+alias sf-authz-send='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_authz_send.sh"'
+alias sf-authz-sign='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_authz_sign.sh"'
+alias sf-bmc-update='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_bmc_update.sh"'
+alias sf-bmc-upload='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_bmc_upload.sh"'
+alias sf-common='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_common.sh"'
+alias sf-debug='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_debug.sh"'
+alias sf-deploy-tools='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_deploy_tools.sh"'
+alias sf-dump-power-logs='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_dump_power_logs.sh"'
+alias sf-dvc-clean='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_dvc_clean.sh"'
+alias sf-eeprom-update-fiddler='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_eeprom_update_fiddler.sh"'
+alias sf-eeprom-update-left2up='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_eeprom_update_left2up.sh"'
+alias sf-eeprom-update-right2up='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_eeprom_update_right2up.sh"'
+alias sf-failsafe-check='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_failsafe_check.sh"'
+alias sf-failsafe-recover='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_failsafe_recover.sh"'
+alias sf-fru-update='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_fru_update.sh"'
+alias sf-fru-update-fiddler='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_fru_update_fiddler.sh"'
+alias sf-fw-ver='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_fw_ver.sh"'
+alias sf-hexdump-to-hexstring='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_hexdump_to_hexstring.sh"'
+alias sf-limits-update='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_limits_update.py"'
+alias sf-pcie-rescan='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_pcie_rescan.sh"'
+alias sf-port-map='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_port_map.sh"'
+alias sf-post-perso='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_post_perso.sh"'
+alias sf-regression-daily='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_regression_daily.sh"'
+alias sf-regression-powercycle='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_regression_powercycle.sh"'
+alias sf-run-commands='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_run_commands.sh"'
+alias sf-run-multiple-slots='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_run_multiple_slots.sh"'
+alias sf-sensor-debug='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_sensor_debug.sh"'
+alias sf-services='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_services.sh"'
+alias sf-services-debug='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_services_debug.sh"'
+alias sf-sfc-install-tools='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_sfc_install_tools.sh"'
+alias sf-sfc-sf00-to-sfdv='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_sfc_sf00_to_sfdv.sh"'
+alias sf-sfc-update='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_sfc_update.sh"'
+alias sf-si-run='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_si_run.sh"'
+alias sf-sot-get='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_sot_get.py"'
+alias sf-station-powercycle='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_station_powercycle.sh"'
+alias sf-tags-create='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_tags_create.sh"'
+alias sf-tray-info-from-part-info='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_tray_info_from_part_info.py"'
+alias sf-tray-info-to-jason='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_tray_info_to_jason.py"'
+alias sf-tray-powercycle='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_tray_powercycle.sh"'
+alias sf-uptime='_run_cmd "${HOME}/santhoshsnair/scripts/sf/sf_uptime.sh"'
+
+# ==============================================================================
+# ZB SCRIPT ALIASES (scripts/zb/ — 1 hyphenated alias per script)
+# ==============================================================================
+alias zb-bmc-mac='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_bmc_mac.sh"'
+alias zb-bmc-update='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_bmc_update.sh"'
+alias zb-bmc-ver='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_bmc_ver.sh"'
+alias zb-dhcp-gen-conf='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_dhcp_gen_conf.sh"'
+alias zb-redfish-crawl='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_redfish_crawl.sh"'
+alias zb-ssh-copy-id='_run_cmd "${HOME}/santhoshsnair/scripts/zb/zb_ssh_copy_id.sh"'
+

@@ -1,0 +1,759 @@
+#!/bin/bash
+
+# ==============================================================================
+# 1. COLORS & CORE UTILITIES
+# ==============================================================================
+export MY_DEFAULT='\033[0m'
+export MY_BLACK='\033[0;30m'
+export MY_RED='\033[0;31m'
+export MY_GREEN='\033[0;32m'
+export MY_YELLOW='\033[0;33m'
+export MY_BLUE='\033[0;34m'
+export MY_MAGENTA='\033[0;35m'
+export MY_CYAN='\033[0;36m'
+export MY_GRAY='\033[0;37m'
+export MY_LIGHT_GREEN='\033[0;92m'
+
+my_echo() {
+  echo -e "${2}${1}${MY_DEFAULT}"
+}
+
+_log_cmd() {
+  echo -e "${MY_YELLOW}[CMD] $*${MY_DEFAULT}" >&2
+}
+
+_run_cmd() {
+  _log_cmd "$*"
+  "$@"
+}
+
+verbose_run() {
+  local cmd="$*"
+  _log_cmd "$cmd"
+  eval "$cmd"
+}
+
+my_proceed() {
+  local in_message=${1:-"Do you want to proceed?"}
+  while true; do
+    read -r -p "$in_message [y/n] :- " yn
+    case $yn in
+      [Yy]* ) return 0;;
+      [Nn]* ) return 1;;
+      * ) my_echo "Please answer yes or no " "$MY_RED";;
+    esac
+  done
+}
+
+my_help_sample_usage() {
+  my_echo "SAMPLE USAGE" "$MY_LIGHT_GREEN"
+  my_echo "  $1 $2" "$MY_LIGHT_GREEN"
+}
+
+# ==============================================================================
+# 2. NAVIGATION & FILESYSTEM
+# ==============================================================================
+alias sss='_log_cmd "unalias -a; unset _SSN_COMMON_SH_LOADED _SSN_SF_COMMON_SH_LOADED; source ~/.bashrc"; unalias -a; unset _SSN_COMMON_SH_LOADED _SSN_SF_COMMON_SH_LOADED; [ -f "$HOME/santhoshsnair/.bashrc" ] && source "$HOME/santhoshsnair/.bashrc" || source "$HOME/.bashrc"'
+alias vi='_run_cmd vim'
+alias l='_run_cmd ls -alrt --color=auto'
+alias grep='grep --colour=auto'
+alias sum='_run_cmd sha1sum'
+alias diskusage="verbose_run 'du --summarize --human-readable * | sort -n'"
+
+# Permissions
+alias permitrx='_run_cmd chmod -R u=+rwx,go=+rx'
+alias permitrwx='_run_cmd chmod -R ugo=+rwx'
+alias permitrw='_run_cmd chmod -R u=+rwx,go=+rw'
+
+# Archives
+unalias myuntar 2>/dev/null || true
+myuntar() {
+  _run_cmd tar -jxvf "$1" -C .
+}
+# Backup
+alias bkup='_run_cmd "${HOME}/scripts/sys-backup.sh"'
+
+trimspaces() {
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    _run_cmd sed -i '' 's/[[:blank:]]*$//' "$1"
+  else
+    _run_cmd sed -i 's/[[:blank:]]*$//' "$1"
+  fi
+  echo "Trimmed trailing spaces in: $1"
+}
+
+# ==============================================================================
+# 3. GIT CONFIGURATION
+# ==============================================================================
+alias gc="verbose_run 'gcertstatus -nocheck_ssh -check_remaining=1h || gcert'"
+
+# Custom Diffs
+alias mydiff='verbose_run "git diff > \"diff_$(date +\"%m%d%Y_%H%M%S\").diff\""'
+
+alias repodiff='run_in_all_repos "git diff . >> ../diff_$(date +%m%d%Y_%H%M%S).diff"'
+alias repoclean='run_in_all_repos "git clean -fd && git checkout ."'
+
+# The "Verbose" Git Alias Suite
+alias gadd="verbose_run 'git add .'"
+alias gbranch="verbose_run 'git branch'"
+alias gbranchall="verbose_run 'git branch --all'"
+
+# Checkout
+alias gcheckout="verbose_run 'git checkout .'"
+unalias gcob 2>/dev/null || true
+gcob() {
+  verbose_run "git checkout -b $1 origin/main"
+}
+
+# Commits & Cherry Picks
+alias gclean="verbose_run 'git clean -fd'"
+alias gcommitamendnoedit="verbose_run 'git commit --amend --no-edit'"
+
+# Diffs
+alias gdiff="verbose_run 'git diff'"
+alias gdo="verbose_run 'git diff --oneline -n20'"
+alias gdiffmain="verbose_run 'git fetch origin main && git diff HEAD origin/main'"
+alias gdiffstaged="verbose_run 'git diff --staged'"
+unalias gdiffvim 2>/dev/null || true
+gdiffvim() {
+  verbose_run "git diff -w $* | vim -R -"
+}
+
+# Fetch/Merge/Push
+alias gpull="verbose_run 'git pull'"
+
+# Status & Logs
+alias glo="verbose_run 'git log -n 10 --oneline'"
+alias glog="verbose_run 'git log --graph --pretty=format:\"%h %ad %s\" --date=short --all --oneline'"
+alias glogall="verbose_run 'git log --graph --oneline --decorate --all'"
+alias glogsincelastpull="verbose_run 'git log HEAD@{1}..HEAD@{0}'"
+alias glsfiles="verbose_run 'git ls-files . --exclude-standard --others'"
+alias gshortlog="verbose_run 'git shortlog --summary -n'"
+alias gstatus="verbose_run 'git status'"
+alias gstatusshort="verbose_run 'git status --short'"
+alias gwhatchanged="verbose_run 'git whatchanged'"
+
+# Stash & Tag
+alias gstash="verbose_run 'git stash'"
+alias gstashapply="verbose_run 'git stash apply'"
+alias gstashbranch="verbose_run 'git stash branch'"
+alias gstashdrop="verbose_run 'git stash drop'"
+alias gstashlist="verbose_run 'git stash list'"
+alias gstashpop="verbose_run 'git stash pop'"
+alias gstashsave="verbose_run 'git stash save'"
+alias gtag="verbose_run 'git tag'"
+alias gtagannotate="verbose_run 'git tag --annotate'"
+alias gtagdelete="verbose_run 'git tag --delete'"
+alias gtaglist="verbose_run 'git tag --list'"
+
+# Core
+alias ginit="verbose_run 'git init'"
+alias gmv="verbose_run 'git mv'"
+alias gremote="verbose_run 'git remote'"
+alias gremoteadd="verbose_run 'git remote add'"
+alias gremoteverbose="verbose_run 'git remote --verbose'"
+alias grc='verbose_run "git fetch origin && git reset --hard origin/\$(git branch --show-current) && git clean -fd"'
+alias gnuke='verbose_run "git fetch origin && git reset --hard origin/\$(git branch --show-current) && git clean -fdx"'
+alias geditorvi="verbose_run 'git config core.editor vim'"
+
+alias stop-fix-port-path="verbose_run 'systemctl --user stop fix-port.path'"
+
+# Opentest
+alias ot_upload_all="verbose_run 'python3 ~/opentest/opentest/tools/otc_upload.py ~/reports_retry_queue809*/*.otdata'"
+alias otc_large_reports_upload="verbose_run '(cd ~ && sed -i \"s/from collections import/from collections.abc import/g\" amp-ansible/tools/util/otc_upload.py && python3 amp-ansible/tools/otc_large_reports_upload.py -c=amp-ansible/tools/upload_settings.ini; git -C amp-ansible checkout tools/util/otc_upload.py)'"
+
+ot_sunfish() {
+  local log_file="$HOME/tmp/ot_sunfish.log"
+  mkdir -p "$(dirname "$log_file")"
+
+  # Trap Ctrl+C (SIGINT) to log the interruption and print a clean ending banner
+  trap '
+    echo "==================================================" | tee -a "$log_file"
+    echo " Interrupted by user at $(date)" | tee -a "$log_file"
+    echo "==================================================" | tee -a "$log_file"
+    trap - INT
+    return 130
+  ' INT
+
+  echo "==================================================" | tee "$log_file"
+  echo " Starting ot_sunfish at $(date)" | tee -a "$log_file"
+  echo " Log file: $log_file"
+  echo "==================================================" | tee -a "$log_file"
+
+  _log_cmd "python3 ot_sunfish.py --skip_test_mode_prompt --skip_external_sfc --skip_employee_prompt --execution_mode=continue_on_fail"
+  # Run the python script, piping both stdout and stderr to tee, and filtering console output
+  python3 ot_sunfish.py --skip_test_mode_prompt --skip_external_sfc --skip_employee_prompt --execution_mode=continue_on_fail 2>&1 | tee -a "$log_file" | grep --line-buffered -E "ENGINE Bus STARTING|ENGINE Starting WebSocket processing|ENGINE Serving on http://0\.0\.0\.0:|ENGINE Bus STARTED"
+  
+  # Capture the exit status of the python script in a cross-shell compatible way
+  local exit_status
+  if [[ -n "$ZSH_VERSION" ]]; then
+    exit_status=${pipestatus[1]}
+  else
+    exit_status=${PIPESTATUS[0]}
+  fi
+
+  # Reset the trap back to default since we finished normally
+  trap - INT
+
+  echo "==================================================" | tee -a "$log_file"
+  if [ $exit_status -eq 0 ]; then
+    echo " Finished successfully at $(date)" | tee -a "$log_file"
+  else
+    echo " Failed with exit status $exit_status at $(date)" | tee -a "$log_file"
+  fi
+  echo "==================================================" | tee -a "$log_file"
+
+  return $exit_status
+}
+
+ot_log() {
+  local port="8899"
+  if [[ "$USER" == "testusr" ]]; then
+    port="8090"
+  fi
+  _run_cmd vim ~/opentest_logs${port}/opentest_plan"${1}".MainProcessPlan.log
+}
+
+# Advanced Git Functions
+gitclone() {
+  local repo=${1:-''}
+  [ -z "$repo" ] && { my_echo "Pass repo name as argument" "$MY_RED"; return 1; }
+
+  verbose_run "git clone https://mfg-partners.googlesource.com/${repo} && cd ${repo}"
+
+  # Setup commit-msg hook
+  local hook_path
+  hook_path="$(git rev-parse --git-dir)/hooks/commit-msg"
+  mkdir -p "$(dirname "$hook_path")"
+  _run_cmd curl -Lo "$hook_path" https://gerrit-review.googlesource.com/tools/hooks/commit-msg
+  _run_cmd chmod +x "$hook_path"
+}
+
+run_in_all_repos() {
+  # Helper to run commands in all sub-git directories
+  local cmd="$1"
+  find . -name .git -type d | cut -d / -f 2 | while read -r dir; do
+  cd "$dir" || continue
+  verbose_run "$cmd"
+  cd - >/dev/null || return
+done
+}
+
+# ==============================================================================
+# 4. SSH & LAB MANAGEMENT
+# ==============================================================================
+_gcert() {
+  local hostname="$1"
+  local username="santhoshsnair"
+  echo "--- Checking gcert on Mac ---"
+  verbose_run "gcertstatus --check_remaining=8h || gcert"
+
+  echo "--- Checking gcert on ${hostname} ---"
+  _run_cmd ssh "${username}@${hostname}" "gcertstatus --check_remaining=8h || gcert"
+}
+
+cth_gcert() {
+  _gcert "cth.c.googlers.com"
+}
+santhoshsnair_gcert() {
+  _gcert "santhoshsnair.c.googlers.com"
+}
+
+# Connect to a cloudtop over SSH + tmux (via tmx2).
+#
+# WHY NOT --gmosh: gmosh does not support gnubbies (go/mosh#recommendations).
+# A mosh *reattach* resumes the terminal without establishing a new SSH
+# session, so the forwarded ssh-agent socket under ~/.ssh/agent/ is never
+# recreated. tmx2 only re-points the stable symlink
+# ~/.tmp/.$USER.ssh_auth_sock when it is invoked from OUTSIDE tmux
+# (/usr/bin/tmx2 line 49), which never happens on a reattach. Result: the
+# symlink dangles and `ssh-add -l` fails with
+# "Error connecting to agent: No such file or directory" on day 2.
+#
+# --tmux expands to `tmx2 new-session -A -s <session> || tmux ...`, i.e. it
+# still uses tmx2 -- it just runs it over a real SSH session, so the agent
+# socket is refreshed on every reconnect. Session persistence comes from
+# tmux, not from mosh, so nothing is lost by dropping gmosh.
+_connect_google_host() {
+  local hostname="$1"
+  local tmux_session="${2:-sunfish}"
+  local username="santhoshsnair"
+
+  echo "--- Checking gcert on Mac ---"
+  verbose_run "gcertstatus --check_remaining=8h || gcert"
+
+  if [ $? -eq 0 ]; then
+    verbose_run "LC_ALL=en_US.UTF-8 rw --remote_gcert_args \"--lifetime=168h --nocorpssh --noprodssh\" --ensure_cloudtop_on --tmux --tmux_session ${tmux_session} ${hostname}"
+  else
+    echo "Local gcert failed, aborting SSH."
+    return 1
+  fi
+}
+
+# Opt-in mosh variant. Survives laptop sleep / IP changes better, but WILL
+# break gnubby-backed ssh-agent forwarding after a reattach -- run
+# `fix_ssh_agent` on the cloudtop, or reconnect with the plain helper above.
+_connect_google_host_mosh() {
+  local hostname="$1"
+  local tmux_session="${2:-sunfish}"
+
+  echo "--- Checking gcert on Mac ---"
+  verbose_run "gcertstatus --check_remaining=8h || gcert"
+
+  if [ $? -eq 0 ]; then
+    verbose_run "LC_ALL=en_US.UTF-8 rw --remote_gcert_args \"--lifetime=168h --nocorpssh --noprodssh\" --ensure_cloudtop_on --gmosh --tmux_session ${tmux_session} ${hostname}"
+  else
+    echo "Local gcert failed, aborting SSH."
+    return 1
+  fi
+}
+
+# Refresh credentials on a running cloudtop WITHOUT opening a shell. This
+# re-establishes an SSH session, which re-runs tmx2 from outside tmux and
+# re-points the stable SSH_AUTH_SOCK symlink. Already-running tmux panes pick
+# it up automatically because the symlink path never changes.
+_refresh_google_host() {
+  local hostname="$1"
+  verbose_run "LC_ALL=en_US.UTF-8 rw -r --nossh_interactively ${hostname}"
+}
+
+santhoshsnair() {
+  _connect_google_host "santhoshsnair.c.googlers.com" "${1:-santhoshsnair}"
+}
+
+cth() {
+  _connect_google_host "cth.c.googlers.com" "${1:-sunfish}"
+}
+
+cth_mosh() {
+  _connect_google_host_mosh "cth.c.googlers.com" "${1:-sunfish}"
+}
+
+cth_refresh() {
+  _refresh_google_host "cth.c.googlers.com"
+}
+
+santhoshsnair_refresh() {
+  _refresh_google_host "santhoshsnair.c.googlers.com"
+}
+
+
+alias lab='_run_cmd "${HOME}/santhoshsnair/scripts/lab_login.sh" lab'
+alias ilab='_run_cmd "${HOME}/santhoshsnair/scripts/lab_login.sh" ilab'
+alias lab-tunnels='_run_cmd "${HOME}/santhoshsnair/scripts/lab_tunnels.sh"'
+alias lab-tunnels-santhoshsnair='_run_cmd "${HOME}/santhoshsnair/scripts/lab_tunnels_santhoshsnair.sh"'
+
+lsssh() {
+  verbose_run "lsof -i -n | grep gnubby-ssh"
+}
+
+fix_ssh_agent() {
+  local target_sock=""
+
+  # 1. Prefer active forwarded SSH agent socket (provides corp/prod certs)
+  if command -v ss >/dev/null 2>&1; then
+    target_sock=$(ss -xl src "$HOME/.ssh/agent/*" 2>/dev/null | awk 'index($5, ".sshd.") {print $5}' | tail -n 1)
+  fi
+
+  # 2. Fall back to active local ssh-agent socket
+  if [ -z "$target_sock" ] && command -v ss >/dev/null 2>&1; then
+    target_sock=$(ss -xl src "$HOME/.ssh/agent/*" 2>/dev/null | awk 'index($5, ".local.") {print $5}' | tail -n 1)
+  fi
+
+  # 3. Fall back to scanning ~/.ssh/agent for any responding socket
+  if [ -z "$target_sock" ]; then
+    local sock
+    for sock in $(ls -t "$HOME/.ssh/agent"/s.* 2>/dev/null); do
+      if SSH_AUTH_SOCK="$sock" ssh-add -l >/dev/null 2>&1 || [ $? -eq 1 ]; then
+        target_sock="$sock"
+        break
+      fi
+    done
+  fi
+
+  # 4. If no agent is running, start a new one
+  if [ -z "$target_sock" ]; then
+    eval $(ssh-agent -s) >/dev/null
+    target_sock="$SSH_AUTH_SOCK"
+    echo "Started new ssh-agent (PID: $SSH_AGENT_PID)"
+  fi
+
+  # Update the stable symlink
+  mkdir -p "$HOME/.tmp"
+  ln -sf "$target_sock" "$HOME/.tmp/.santhoshsnair.ssh_auth_sock"
+  export SSH_AUTH_SOCK="$HOME/.tmp/.santhoshsnair.ssh_auth_sock"
+
+  # Load standard local keys if present
+  local key
+  for key in "$HOME/.ssh/id_rsa" "$HOME/.ssh/id_rsa_lab" "$HOME/.ssh/id_ed25519" "$HOME/.ssh/id_rsa_ilab" "$HOME/devlabs_id_rsa"; do
+    [ -f "$key" ] && ssh-add "$key" 2>/dev/null
+  done
+
+  # Sync socket to tmux environment if tmux is present
+  if command -v tmux >/dev/null 2>&1; then
+    tmux set-environment -g SSH_AUTH_SOCK "$HOME/.tmp/.santhoshsnair.ssh_auth_sock" 2>/dev/null
+    tmux set-environment SSH_AUTH_SOCK "$HOME/.tmp/.santhoshsnair.ssh_auth_sock" 2>/dev/null
+  fi
+
+  echo "SSH_AUTH_SOCK -> $target_sock"
+  _run_cmd ssh-add -l
+}
+alias fix-ssh-agent='fix_ssh_agent'
+
+
+kill_ssh_port() {
+  local port=$1
+  [ -z "$port" ] && { echo "Error: Please provide a port number."; return 1; }
+
+  local pids
+  pids=$(lsof -ti :"$port")
+  if [ -z "$pids" ]; then
+    echo "No processes found using port $port."
+  else
+    echo "Killing processes using port $port: $pids"
+    _run_cmd kill $pids
+  fi
+}
+
+tmx() {
+  local tmux_session=${1:-"santhoshsnair"}
+  _run_cmd tmx2 new -A -s "$tmux_session"
+}
+
+nomachine_base() {
+  local user=$1
+  local lab_machine=$2
+  local port=$3
+
+  [[ -z $port || -z $lab_machine ]] && { my_echo "Pass lab_machine and port" "$MY_RED"; return 1; }
+
+  verbose_run "gcertstatus -nocheck_ssh -check_remaining=1h || gcert"
+  verbose_run "ssh -f -N -L ${port}:localhost:4000 ${user}@${lab_machine}"
+  verbose_run "pkill nxplayer"
+
+  # Determine session file path based on user
+  local session_file="/Users/santhoshsnair/Documents/NoMachine/${lab_machine}.nxs"
+  [ "$user" == "santhoshsnair" ] && session_file="/Users/santhoshsnair/Documents/NoMachine/${lab_machine}-santhoshsnair.nxs"
+
+  verbose_run "/Applications/NoMachine.app/Contents/MacOS/nxplayer --session ${session_file}"
+}
+
+nomachine() {
+  nomachine_base "testusr" "$1" "$2"
+}
+mu_nomachine() {
+  nomachine_base "santhoshsnair" "$1" "$2"
+}
+
+# ==============================================================================
+# 5. STATION DIAGNOSTICS
+# ==============================================================================
+
+chiller_dashboard() {
+  local user="testusr"
+  local lab_machine="$1"
+  local port=5000
+
+  if [ $# -eq 2 ]; then
+    user="$1"
+    lab_machine="$2"
+  elif [[ "$1" == *@* ]]; then
+    user="${1%%@*}"
+    lab_machine="${1#*@}"
+  fi
+
+  [[ -z $lab_machine ]] && {
+    my_echo "Usage: chiller_dashboard [user] <lab_machine>" "$MY_RED"
+    my_echo "Example: chiller_dashboard sfcth9" "$MY_YELLOW"
+    my_echo "         chiller_dashboard testusr@sfcth9" "$MY_YELLOW"
+    return 1
+  }
+
+  # Specifically look for an existing SSH tunnel forwarding this chiller port (port 5000)
+  local existing_ssh_pids=""
+  if command -v pgrep >/dev/null 2>&1; then
+    existing_ssh_pids=$(pgrep -f "ssh.*${port}:localhost:${port}" 2>/dev/null)
+  fi
+  if [[ -z "$existing_ssh_pids" ]] && command -v lsof >/dev/null 2>&1; then
+    existing_ssh_pids=$(lsof -a -c ssh -ti "tcp:${port}" 2>/dev/null)
+  fi
+
+  if [[ -n "$existing_ssh_pids" ]]; then
+    my_echo "WARNING: An existing chiller SSH tunnel on port ${port} is running:" "$MY_YELLOW"
+    if command -v ps >/dev/null 2>&1; then
+      ps -fp $existing_ssh_pids 2>/dev/null
+    fi
+
+    if ! my_proceed "Kill existing chiller SSH tunnel and start new one?"; then
+      my_echo "Aborted." "$MY_RED"
+      return 1
+    fi
+
+    my_echo "Stopping chiller SSH tunnel (PID: $existing_ssh_pids)..." "$MY_YELLOW"
+    kill $existing_ssh_pids 2>/dev/null
+    sleep 1
+
+    local remaining_ssh_pids=""
+    if command -v pgrep >/dev/null 2>&1; then
+      remaining_ssh_pids=$(pgrep -f "ssh.*${port}:localhost:${port}" 2>/dev/null)
+    elif command -v lsof >/dev/null 2>&1; then
+      remaining_ssh_pids=$(lsof -a -c ssh -ti "tcp:${port}" 2>/dev/null)
+    fi
+
+    if [[ -n "$remaining_ssh_pids" ]]; then
+      kill -9 $remaining_ssh_pids 2>/dev/null
+      sleep 1
+    fi
+    my_echo "Chiller SSH tunnel stopped." "$MY_GREEN"
+  fi
+
+  # Check if port is in use by a non-SSH process
+  local other_pids=""
+  if command -v lsof >/dev/null 2>&1; then
+    other_pids=$(lsof -ti "tcp:${port}" 2>/dev/null)
+  fi
+  if [[ -n "$other_pids" ]]; then
+    my_echo "ERROR: Port ${port} is currently in use by a non-SSH process:" "$MY_RED"
+    lsof -i "tcp:${port}" 2>/dev/null
+    if [[ "$(uname)" == "Darwin" ]] && lsof -i "tcp:${port}" 2>/dev/null | grep -q "ControlCenter"; then
+      my_echo "Note: Port ${port} is held by macOS AirPlay Receiver (ControlCenter)." "$MY_RED"
+      my_echo "Disable it via System Settings -> General -> AirDrop & AirPlay." "$MY_YELLOW"
+    fi
+    return 1
+  fi
+
+  verbose_run "ssh -f -N -L ${port}:localhost:${port} ${user}@${lab_machine}"
+}
+
+# ==============================================================================
+# 6. DEVELOPMENT TOOLS (Python/Cscope)
+# ==============================================================================
+cspy() {
+  _cscope_gen "py,cfg,ini,csv"
+}
+
+csc() {
+  _cscope_gen "c,cpp,h,hpp"
+}
+
+_cscope_gen() {
+  local extensions="$1"
+  rm -f cscope* ncscope*
+
+  # Generate find arguments based on extensions
+  local find_args=""
+  for ext in $(echo $extensions | tr "," "\n"); do
+    find_args="$find_args -name '*.$ext' -o"
+  done
+  find_args=${find_args%-o} # Remove trailing -o
+
+  local tmp_list=$(mktemp "/tmp/${USER}_cscope_XXXXXX.txt")
+
+  # Use eval to handle the dynamic find arguments
+  eval "find -L . -type f \( $find_args \) -print" | grep -v 'obj-' >> "$tmp_list"
+
+  sort "$tmp_list" -u > cscope.files
+  rm "$tmp_list"
+
+  _run_cmd cscope -v -buqk -F cscope.files -f cscope.out
+  _run_cmd cscope -d -p9
+}
+
+tox_command() {
+  _run_cmd /home/testusr/viper-test/.tox/py3/bin/python -m pytest unit_tests
+  _run_cmd python3 -m pylint --output-format=colorized config -d duplicate-code
+}
+
+indentpy() {
+  local dir=${1:-${PWD}}
+  verbose_run "pyformat --in_place --indent_size 4 ${dir}"
+}
+
+# ==============================================================================
+# 7. RSYNC UTILS
+# ==============================================================================
+alias rlab='_run_cmd "${HOME}/santhoshsnair/scripts/lab_rsync.sh" --mode lab'
+alias rilab='_run_cmd "${HOME}/santhoshsnair/scripts/lab_rsync.sh" --mode ilab'
+alias rcloud='_run_cmd "${HOME}/santhoshsnair/scripts/lab_rsync.sh" --mode cloud'
+alias rall='rlab && rilab && rcloud'
+
+rsyncfrom() {
+  local user=${1:-santhoshsnair}
+  local remote_machine=${2}
+  local remote_dir=${3:-${PWD}}
+  local local_dir=${4:-${PWD}}
+
+  [ -z "$remote_machine" ] && { my_help_sample_usage "${FUNCNAME}" "user remote_machine remote_dir local_dir"; return 1; }
+
+  local pass_file="${HOME}/santhoshsnair/passwords/password_${user}.txt"
+  _run_cmd sshpass -f "${pass_file}" rsync -avz -e ssh "${user}@${remote_machine}:${remote_dir}" "${local_dir}"
+}
+
+rsyncto() {
+  local remote_machine=${1}
+  local local_dir=${2:-${HOME}/santhoshsnair}
+  local user=${3:-santhoshsnair}
+  local remote_dir=${4:-""}
+
+  [ -z "$remote_machine" ] && { my_help_sample_usage "${FUNCNAME}" "remote_machine local_dir user remote_dir"; return 1; }
+
+  local pass_file="${HOME}/santhoshsnair/passwords/password_${user}.txt"
+  _run_cmd sshpass -f "${pass_file}" rsync -avz -e ssh "${local_dir}" "${user}@${remote_machine}:${remote_dir}"
+}
+
+# Check status of specific lab services
+check_lab_services() {
+  SERVICES=(
+  "isc-dhcp-server"
+  "tftpd-hpa"
+  "NetworkManager"
+  "radvd"
+  "httpfileserverd"
+  "isc-dhcp-server6"
+  "chillermonitor"
+  "rectifier_controller"
+)
+
+  _log_cmd "systemctl is-active --quiet ${SERVICES[*]}"
+  my_echo "--- SERVICE STATUS REPORT ---" "$MY_CYAN"
+
+  for service in "${SERVICES[@]}"; do
+    if systemctl is-active --quiet "$service"; then
+      printf "%-30s [ %bACTIVE%b ]\n" "$service" "$MY_GREEN" "$MY_DEFAULT"
+    else
+      if systemctl is-failed --quiet "$service"; then
+        printf "%-30s [ %bFAILED%b ]\n" "$service" "$MY_RED" "$MY_DEFAULT"
+      else
+        printf "%-30s [ %bINACTIVE%b ]\n" "$service" "$MY_YELLOW" "$MY_DEFAULT"
+      fi
+    fi
+  done
+  echo ""
+}
+
+alias chks="check_lab_services"
+
+# Check status of process plan stations
+check_stations() {
+  local port=${1:-8090}
+  _log_cmd "curl -s --max-time 0.5 http://127.0.0.1:${port}/get_process_station_ui?station_id={1..16}"
+  echo "Checking stations on port $port..."
+  for i in {1..16}; do
+    res=$(curl -s --max-time 0.5 "http://127.0.0.1:${port}/get_process_station_ui?station_id=$i")
+    if [ -z "$res" ]; then
+      echo -e "Station $i: ${MY_RED}UNREACHABLE${MY_DEFAULT}"
+    else
+      status=$(python3 -c "import sys, json; print(json.loads(sys.stdin.read()).get('current_status', ''))" <<< "$res" 2>/dev/null)
+      case "$status" in
+        1) label="${MY_GREEN}IDLE${MY_DEFAULT}" ;;
+        3) label="${MY_CYAN}RUNNING${MY_DEFAULT}" ;;
+        4) label="${MY_YELLOW}WAITING${MY_DEFAULT}" ;;
+        *) label="${MY_MAGENTA}UNKNOWN ($status)${MY_DEFAULT}" ;;
+      esac
+      echo -e "Station $i: $label"
+    fi
+  done
+}
+
+# Check tftpboot netboot image version and build info.
+# Usage: check-netboot [path/to/initrd.cpio.gz | directory]
+#   No argument: ./initrd.cpio.gz, else the zebrabeach images in /tftpboot and ~/tftpboot.
+check_tftpboot_image() {
+  local target="${1:-}" img out
+  local -a images=()
+  # etc/os-release is a symlink to ../usr/lib/os-release in OVSS images, so read the target too.
+  local -a files=(etc/version etc/build etc/os-release usr/lib/os-release etc/ovss-build-info/templateconf.cfg)
+
+  if [[ -n "$target" ]]; then
+    if [[ -f "$target" ]]; then
+      images+=("$target")
+    elif [[ -d "$target" ]]; then
+      if [[ -f "${target%/}/initrd.cpio.gz" ]]; then
+        images+=("${target%/}/initrd.cpio.gz")
+      else
+        while IFS= read -r img; do
+          [[ -n "$img" ]] && images+=("$img")
+        done < <(find "$target" -maxdepth 4 -name "initrd.cpio.gz" 2>/dev/null | sort)
+      fi
+    else
+      my_echo "Error: Target '$target' not found." "$MY_RED"
+      return 1
+    fi
+  elif [[ -f "./initrd.cpio.gz" ]]; then
+    images+=("./initrd.cpio.gz")
+  else
+    local candidate
+    for candidate in \
+      /tftpboot/zebrabeach/initrd.cpio.gz \
+      /tftpboot/zebrabeach-sf/initrd.cpio.gz \
+      /tftpboot/zebrabeach-zf/initrd.cpio.gz \
+      "${HOME}/tftpboot/zebrabeach/initrd.cpio.gz"; do
+      [[ -f "$candidate" ]] && images+=("$candidate")
+    done
+    if [[ ${#images[@]} -eq 0 && -d /tftpboot ]]; then
+      while IFS= read -r img; do
+        [[ -n "$img" ]] && images+=("$img")
+      done < <(find /tftpboot -maxdepth 4 -name "initrd.cpio.gz" 2>/dev/null | sort)
+    fi
+  fi
+
+  if [[ ${#images[@]} -eq 0 ]]; then
+    my_echo "No initrd.cpio.gz found in ./, /tftpboot or ~/tftpboot." "$MY_RED"
+    my_echo "Usage: check-netboot [path/to/initrd.cpio.gz | directory]" "$MY_YELLOW"
+    return 1
+  fi
+
+  for img in "${images[@]}"; do
+    my_echo "=== Netboot Image: ${img} ===" "$MY_CYAN"
+    _log_cmd "zcat ${img} | cpio -i --quiet --to-stdout ${files[*]} 2>/dev/null"
+    out=$(zcat "$img" | cpio -i --quiet --to-stdout "${files[@]}" 2>/dev/null)
+    if [[ -n "$out" ]]; then
+      echo "$out"
+    else
+      my_echo "No version/build files found in ${img}." "$MY_RED"
+    fi
+    echo ""
+  done
+}
+
+alias check-netboot="check_tftpboot_image"
+
+alias sf-pcie-debug='_run_cmd "${HOME}/santhoshsnair/scripts/sf_pcie_debug.py"'
+alias redfish-crawl='_run_cmd "${HOME}/santhoshsnair/scripts/redfish_crawl.sh"'
+alias redfish-crawl-core='_run_cmd "${HOME}/santhoshsnair/scripts/redfish_crawl_core.sh"'
+alias sf-redfish-crawl='_run_cmd "${HOME}/santhoshsnair/scripts/sf_redfish_crawl.sh"'
+
+# ==============================================================================
+# 8. OPENTEST (`ot-`) AI TRIAGE & OTC UPLOAD
+# ==============================================================================
+alias ot-triage='_run_cmd "${HOME}/.venv312/bin/python3" "${HOME}/santhoshsnair/scripts/ai_triage/ot_ai_triage.py"'
+alias ot-triage-daily='_run_cmd "${HOME}/santhoshsnair/scripts/ai_triage/run_daily_triage.sh"'
+alias ot-triage-update-symptoms='_run_cmd "${HOME}/santhoshsnair/scripts/ai_triage/update_symptoms.sh"'
+alias ot-report-urls-fast='_run_cmd "${HOME}/santhoshsnair/scripts/ai_triage/fast_url_fetcher.py"'
+alias ot-log-download='_run_cmd python3 "${HOME}/santhoshsnair/scripts/ai_triage/log_downloader.py"'
+alias ot-upload='_run_cmd "${HOME}/santhoshsnair/scripts/ot_upload.sh"'
+alias ot-upload-batch='_run_cmd "${HOME}/santhoshsnair/scripts/ot_upload_batch.sh"'
+alias ot-upload-otc='_run_cmd "${HOME}/santhoshsnair/scripts/ot_upload_otc.py"'
+alias ot-replace-errorkey='_run_cmd "${HOME}/santhoshsnair/scripts/ot_replace_errorkey.sh"'
+alias ot-truncate-attachment-desc='_run_cmd "${HOME}/santhoshsnair/scripts/ot_truncate_attachment_desc.sh"'
+alias ot-report-urls='_run_cmd "${HOME}/santhoshsnair/scripts/ot_report_urls.py"'
+alias ot-mem-monitor='_run_cmd "${HOME}/santhoshsnair/scripts/ot_mem_monitor.py"'
+
+# ==============================================================================
+# 9. LAB (`lab-`) & REPO (`repo-`) UTILS
+# ==============================================================================
+alias lab-host-add='_run_cmd "${HOME}/santhoshsnair/scripts/lab_host_add.py"'
+alias lab-host-add-batch='_run_cmd "${HOME}/santhoshsnair/scripts/lab_host_add_batch.py"'
+alias lab-tmux-clean='_run_cmd "${HOME}/santhoshsnair/scripts/lab_tmux_clean.sh"'
+alias gcert-fix='_run_cmd "${HOME}/santhoshsnair/scripts/gcert_fix.sh"'
+alias repo-gerrit-update='_run_cmd "${HOME}/santhoshsnair/scripts/repo_gerrit_update.sh"'
+alias git-sb-diff='_run_cmd "${HOME}/santhoshsnair/scripts/git_sb_diff"'
+alias hw-eye-margin-run='_run_cmd python3 "${HOME}/santhoshsnair/scripts/hw_eye_margin_run.py"'
+alias lab-login='_run_cmd "${HOME}/santhoshsnair/scripts/lab_login.sh"'
+alias lab-mu-setup='_run_cmd "${HOME}/santhoshsnair/scripts/lab_mu_setup.sh"'
+alias repo-clone='_run_cmd "${HOME}/santhoshsnair/scripts/repo_clone.py"'
+alias repo-diff='_run_cmd "${HOME}/santhoshsnair/scripts/repo_diff.sh"'
+alias repo-info='_run_cmd "${HOME}/santhoshsnair/scripts/repo_info.sh"'
+alias repo-update='_run_cmd "${HOME}/santhoshsnair/scripts/repo_update.sh"'
+alias lab-rsync='_run_cmd "${HOME}/santhoshsnair/scripts/lab_rsync.sh"'
+alias repo-update-tpu='_run_cmd "${HOME}/santhoshsnair/scripts/repo_update_tpu.sh"'
